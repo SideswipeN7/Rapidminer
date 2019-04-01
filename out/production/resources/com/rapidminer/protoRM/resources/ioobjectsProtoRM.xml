@@ -4,9 +4,9 @@
 	<!--
 	<ioobject
 		name="Example IOObject"
-		class="com.rapidminer.extension.ioobjects.ExampleIOObject"
+		class="com.rapidminer.protoRM.ioobjects.ExampleIOObject"
 		reportable="true">
-	  <renderer>com.rapidminer.extension.ioobjects.renderer.ExampleIOObjectRenderer</renderer>
+	  <renderer>com.rapidminer.protoRM.ioobjects.renderer.ExampleIOObjectRenderer</renderer>
 	</ioobject>
     -->
 </ioobjects>
