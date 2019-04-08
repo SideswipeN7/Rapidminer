@@ -1,19 +1,22 @@
 package com.rapidminer.protoRM.operator;
 
+import com.rapidminer.example.Attribute;
 import com.rapidminer.example.Example;
 import com.rapidminer.example.ExampleSet;
+import com.rapidminer.example.table.AttributeFactory;
 import com.rapidminer.operator.Operator;
 import com.rapidminer.operator.OperatorDescription;
 import com.rapidminer.operator.OperatorException;
 import com.rapidminer.operator.ports.InputPort;
 import com.rapidminer.operator.ports.OutputPort;
+import com.rapidminer.tools.Ontology;
 import com.rapidminer.tools.OperatorService;
 import com.rapidminer.tools.math.similarity.numerical.EuclideanDistance;
 
 public class OperatorClass extends Operator {
     private EuclideanDistance distance_ = new EuclideanDistance();
-    private InputPort in1 = this.getInputPorts().createPort("Input 1");
-    private InputPort in2 = this.getInputPorts().createPort("Input 2");
+    private InputPort in1 = this.getInputPorts().createPort("Input Points");
+    private InputPort in2 = this.getInputPorts().createPort("Input Prototypes");
     private OutputPort out = this.getOutputPorts().createPort("Output");
 
     /**
@@ -34,31 +37,37 @@ public class OperatorClass extends Operator {
     }
 
     public void doWork() throws OperatorException {
-        ExampleSet es = this.in1.getDataOrNull(ExampleSet.class);
-        ExampleSet es2 = this.in2.getDataOrNull(ExampleSet.class);
-        this.distance_.init(es);
-
-        for (Example e : es) {
+        ExampleSet points = this.in1.getDataOrNull(ExampleSet.class);
+        ExampleSet prototypes = this.in2.getDataOrNull(ExampleSet.class);
+        this.distance_.init(points);
+        Attribute a1 = AttributeFactory.createAttribute("Point_1", Ontology.NUMERICAL);
+        Attribute a2 = AttributeFactory.createAttribute("Point_2", Ontology.NUMERICAL);
+        points = (ExampleSet)points.clone();
+        points.getExampleTable().addAttribute(a1);
+        points.getExampleTable().addAttribute(a2);
+        points.getAttributes().addRegular(a1);
+        points.getAttributes().addRegular(a2);
+        for (Example point : points) {
             Example point1 = null;
             Example point2 = null;
             double minDist1 = Double.POSITIVE_INFINITY;
             double minDist2 = Double.POSITIVE_INFINITY;
-            for (Example e1 : es2) {
-                double distance = this.distance_.calculateDistance(e, e1);
-                if (e.getLabel() == e1.getLabel()) {
+            for (Example prototype : prototypes) {
+                double distance = distance_.calculateDistance(point, prototype);
+                if (point.getLabel() == prototype.getLabel()) {
                     if (point1 == null || distance < minDist1) {
-                        point1 = e1;
+                        point1 = prototype;
                         minDist1 = distance;
                     }
                 } else if (point2 == null || distance < minDist2) {
-                    point2 = e1;
+                    point2 = prototype;
                     minDist2 = distance;
                 }
             }
 
-            e.put("Point_1", point1);
-            e.put("Point_2", point2);
+            point.setValue(a1, point1.getId());
+            point.setValue(a2, point2.getId());
         }
-        this.out.deliver(es);
+        this.out.deliver(points);
     }
 }
