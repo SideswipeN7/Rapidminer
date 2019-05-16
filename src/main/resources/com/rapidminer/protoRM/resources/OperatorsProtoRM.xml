@@ -4,9 +4,9 @@
         <!-- This is an example how to specify Operators and Operator groups. The Operator groups define
                 where Operators will be located in the Operator tree. -->
 
-        <group key="example_group">
+        <group key="RM">
            <operator>
-              <key>example_operator_key</key>
+              <key>RM Operator</key>
               <class>com.rapidminer.protoRM.operator.OperatorClass</class>
            </operator>
          </group>
