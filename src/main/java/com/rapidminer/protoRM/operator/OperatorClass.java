@@ -33,6 +33,8 @@ public class OperatorClass extends Operator implements CapabilityProvider {
     private InputPort in2 = this.getInputPorts().createPort("Input Prototypes");
     private OutputPort out = this.getOutputPorts().createPort("Output");
     private DistanceMeasureHelper measureHelper = new DistanceMeasureHelper(this);
+    private Logger logger = Logger.getLogger(OperatorClass.class.getName());
+    private boolean isDebug = false;
 
     /**
      * <p>
@@ -75,7 +77,7 @@ public class OperatorClass extends Operator implements CapabilityProvider {
 
     public void doWork() throws OperatorException {
         //Set Logger
-        Logger logger = Logger.getLogger(OperatorClass.class.getName());
+
         //Get data
         ExampleSet points = this.in1.getDataOrNull(ExampleSet.class);
         ExampleSet prototypes = this.in2.getDataOrNull(ExampleSet.class);
@@ -98,16 +100,16 @@ public class OperatorClass extends Operator implements CapabilityProvider {
             double minDist2 = Double.POSITIVE_INFINITY;
             Example p1 = null;
             Example p2 = null;
-            logger.log(Level.INFO, "########################");
-            logger.log(Level.INFO, "Point ID: " + point.getId());
-            logger.log(Level.INFO, "########################");
+            log(Level.INFO, "########################");
+            log(Level.INFO, "Point ID: " + point.getId());
+            log(Level.INFO, "########################");
             //Check distances
             for (Example prototype : prototypes) {
-                logger.log(Level.INFO, "Prototype ID: " + prototype.getId());
+                log(Level.INFO, "Prototype ID: " + prototype.getId());
                 //Calculate distance
                 Example other = StreamSupport.stream(points.spliterator(), false).filter(d -> d.getId() == prototype.getId()).findFirst().get();
                 double currDistance = distance.calculateDistance(point, other);
-                logger.log(Level.INFO, "Distance: " + currDistance);
+                log(Level.INFO, "Distance: " + currDistance);
                 //Set distances
                 if (point.getLabel() == prototype.getLabel()) {
                     if (currDistance < minDist1) {
@@ -137,6 +139,13 @@ public class OperatorClass extends Operator implements CapabilityProvider {
         }
         //Return data
         this.out.deliver(points);
+    }
+
+
+    void log(java.util.logging.Level level, String message) {
+        if (isDebug) {
+            logger.log(level, message);
+        }
     }
 
 
