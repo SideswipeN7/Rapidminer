@@ -45,11 +45,11 @@ public class OperatorClass extends Operator implements CapabilityProvider {
     private Attribute a2 = AttributeFactory.createAttribute("ID_Proto_2", Ontology.NUMERICAL);
     private Attribute a3 = AttributeFactory.createAttribute("ID_Proto_Pair", Ontology.NUMERICAL);
     //Optimize
-    HashMap<Double, Long> pairIdMap = new HashMap<>();
-    HashMap<Long, Integer> countersMap = new HashMap<>();
-    HashMap<Double, Point2D.Double> secondaryPointsMap = new HashMap<>();
-    HashMap<Double, Point2D.Double> mainPointsMap = new HashMap<>();
-    int biggestSize = -1;
+    private HashMap<Double, Long> pairIdMap = new HashMap<>();
+    private HashMap<Long, Integer> countersMap = new HashMap<>();
+    private HashMap<Double, Point2D.Double> secondaryPointsMap = new HashMap<>();
+    private HashMap<Double, Point2D.Double> mainPointsMap = new HashMap<>();
+    private int biggestSize = -1;
 
     /**
      * <p>
