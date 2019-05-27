@@ -1,6 +1,7 @@
 package com.rapidminer.protoRM.operator;
 
 import com.rapidminer.example.Attribute;
+import com.rapidminer.example.Attributes;
 import com.rapidminer.example.Example;
 import com.rapidminer.example.ExampleSet;
 import com.rapidminer.example.table.AttributeFactory;
@@ -22,10 +23,8 @@ import com.rapidminer.tools.math.similarity.DistanceMeasureHelper;
 import com.rapidminer.tools.math.similarity.DistanceMeasures;
 
 import java.util.List;
-import java.util.Objects;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import java.util.stream.StreamSupport;
 
 public class OperatorClass extends Operator implements CapabilityProvider {
 
@@ -33,6 +32,12 @@ public class OperatorClass extends Operator implements CapabilityProvider {
     private InputPort in2 = this.getInputPorts().createPort("Input Prototypes");
     private OutputPort out = this.getOutputPorts().createPort("Output");
     private DistanceMeasureHelper measureHelper = new DistanceMeasureHelper(this);
+    private Logger logger = Logger.getLogger(OperatorClass.class.getName());
+    private boolean isDebug = false;
+    //Create attributes
+    private Attribute a1 = AttributeFactory.createAttribute("ID_Proto_1", Ontology.NUMERICAL);
+    private Attribute a2 = AttributeFactory.createAttribute("ID_Proto_2", Ontology.NUMERICAL);
+    private Attribute a3 = AttributeFactory.createAttribute("ID_Proto_Pair", Ontology.NUMERICAL);
 
     /**
      * <p>
@@ -75,14 +80,11 @@ public class OperatorClass extends Operator implements CapabilityProvider {
 
     public void doWork() throws OperatorException {
         //Set Logger
-        Logger logger = Logger.getLogger(OperatorClass.class.getName());
+
         //Get data
         ExampleSet points = this.in1.getDataOrNull(ExampleSet.class);
         ExampleSet prototypes = this.in2.getDataOrNull(ExampleSet.class);
-        //Create attributes
-        Attribute a1 = AttributeFactory.createAttribute("ID_Proto_1", Ontology.NUMERICAL);
-        Attribute a2 = AttributeFactory.createAttribute("ID_Proto_2", Ontology.NUMERICAL);
-        Attribute a3 = AttributeFactory.createAttribute("ID_Proto_Pair", Ontology.NUMERICAL);
+
         //Add attributes to table
         points.getExampleTable().addAttribute(a1);
         points.getExampleTable().addAttribute(a2);
@@ -92,51 +94,85 @@ public class OperatorClass extends Operator implements CapabilityProvider {
         points.getAttributes().setSpecialAttribute(a2, "id_pair_2");
         points.getAttributes().setSpecialAttribute(a3, "batch");
         DistanceMeasure distance = measureHelper.getInitializedMeasure(points);
+        //Get Attributes
+        Attributes attributesExampleSet = points.getAttributes();
+        Attributes attributesPrototypes = prototypes.getAttributes();
         //Main loop
         for (Example point : points) {
             double minDist1 = Double.POSITIVE_INFINITY;
             double minDist2 = Double.POSITIVE_INFINITY;
-            Example p1 = null;
-            Example p2 = null;
-            logger.log(Level.INFO, "########################");
-            logger.log(Level.INFO, "Point ID: " + point.getId());
-            logger.log(Level.INFO, "########################");
+            double p1 = -1;
+            double p2 = -1;
+            log(Level.INFO, "########################");
+            log(Level.INFO, "Point ID: " + point.getId());
+            log(Level.INFO, "########################");
+            double[] valuesExample = getPointAttributes(attributesExampleSet, point);
             //Check distances
             for (Example prototype : prototypes) {
-                logger.log(Level.INFO, "Prototype ID: " + prototype.getId());
+                log(Level.INFO, "Prototype ID: " + prototype.getId());
                 //Calculate distance
-                Example other = StreamSupport.stream(points.spliterator(), false).filter(d -> d.getId() == prototype.getId()).findFirst().get();
-                double currDistance = distance.calculateDistance(point, other);
-                logger.log(Level.INFO, "Distance: " + currDistance);
+                double[] valuesPrototype = getPrototypeAttributes(attributesExampleSet, attributesPrototypes, prototype);
+                double currDistance = distance.calculateDistance(valuesExample, valuesPrototype);
+                log(Level.INFO, "Distance: " + currDistance);
                 //Set distances
                 if (point.getLabel() == prototype.getLabel()) {
                     if (currDistance < minDist1) {
                         minDist1 = currDistance;
-                        p1 = prototype;
+                        p1 = prototype.getId();
                     }
                 } else {
                     if (currDistance < minDist2) {
                         minDist2 = currDistance;
-                        p2 = prototype;
+                        p2 = prototype.getId();
                     }
                 }
             }
-            long pairId;
-            //Set smallest ID as a1 and bigger ID as a2
-            if (Objects.requireNonNull(p1).getId() < Objects.requireNonNull(p2).getId()) {
-                point.setValue(a1, Objects.requireNonNull(p1).getId());
-                point.setValue(a2, Objects.requireNonNull(p2).getId());
-                pairId = Cantor.pair((new Double(p1.getId())).longValue(), (new Double(p2.getId())).longValue());
-            } else {
-                point.setValue(a1, Objects.requireNonNull(p2).getId());
-                point.setValue(a2, Objects.requireNonNull(p1).getId());
-                pairId = Cantor.pair((new Double(p2.getId())).longValue(), (new Double(p1.getId())).longValue());
-            }
-            //Set new ID for pair of a1 and a2
-            point.setValue(a3, pairId);
+            SetPointAttributes(point, p1, p2);
         }
         //Return data
         this.out.deliver(points);
+    }
+
+    private void SetPointAttributes(Example point, double p1, double p2) {
+        //Set smallest ID as a1 and bigger ID as a2
+        if (p1 > p2) {
+            double temp = p2;
+            p2 = p1;
+            p1 = temp;
+        }
+        long pairId = Cantor.pair((long)p1, (long)p2);
+        //Set point values
+        point.setValue(a1, p1);
+        point.setValue(a2, p2);
+        point.setValue(a3, pairId);
+    }
+
+    private double[] getPrototypeAttributes(Attributes attributesPoints, Attributes attributesPrototypes, Example prototype) {
+        int numAttrs = attributesPoints.size();
+        double[] valuesPrototype = new double[numAttrs];
+        int i = 0;
+        for (Attribute attrName : attributesPoints) {
+            Attribute prototypeAttribute = attributesPrototypes.get(attrName.getName());
+            valuesPrototype[i++] = prototype.getValue(prototypeAttribute);
+        }
+        return valuesPrototype;
+    }
+
+    private double[] getPointAttributes(Attributes attributes, Example point) {
+        int numAttrs = attributes.size();
+        double[] valuesExample = new double[numAttrs];
+        int i = 0;
+        for (Attribute attrName : attributes) {
+            valuesExample[i++] = point.getValue(attrName);
+        }
+        return  valuesExample;
+    }
+
+
+    private void log(java.util.logging.Level level, String message) {
+        if (isDebug) {
+            logger.log(level, message);
+        }
     }
 
 
