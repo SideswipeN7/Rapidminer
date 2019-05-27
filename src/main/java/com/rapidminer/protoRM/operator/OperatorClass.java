@@ -17,6 +17,7 @@ import com.rapidminer.operator.ports.metadata.DistanceMeasurePrecondition;
 import com.rapidminer.parameter.ParameterType;
 import com.rapidminer.parameter.ParameterTypeBoolean;
 import com.rapidminer.parameter.ParameterTypeDouble;
+import com.rapidminer.parameter.UndefinedParameterError;
 import com.rapidminer.protoRM.Cantor;
 import com.rapidminer.tools.Ontology;
 import com.rapidminer.tools.OperatorService;
@@ -24,6 +25,8 @@ import com.rapidminer.tools.math.similarity.DistanceMeasure;
 import com.rapidminer.tools.math.similarity.DistanceMeasureHelper;
 import com.rapidminer.tools.math.similarity.DistanceMeasures;
 
+import java.awt.geom.Point2D;
+import java.util.HashMap;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -41,6 +44,12 @@ public class OperatorClass extends Operator implements CapabilityProvider {
     private Attribute a1 = AttributeFactory.createAttribute("ID_Proto_1", Ontology.NUMERICAL);
     private Attribute a2 = AttributeFactory.createAttribute("ID_Proto_2", Ontology.NUMERICAL);
     private Attribute a3 = AttributeFactory.createAttribute("ID_Proto_Pair", Ontology.NUMERICAL);
+    //Optimize
+    HashMap<Double, Long> pairIdMap = new HashMap<>();
+    HashMap<Long, Integer> countersMap = new HashMap<>();
+    HashMap<Double, Point2D.Double> secondaryPointsMap = new HashMap<>();
+    HashMap<Double, Point2D.Double> mainPointsMap = new HashMap<>();
+    int biggestSize = -1;
 
     /**
      * <p>
@@ -155,7 +164,7 @@ public class OperatorClass extends Operator implements CapabilityProvider {
         points.getAttributes().setSpecialAttribute(a3, "batch");
     }
 
-    private void SetPointAttributes(Example point, double p1, double p2) {
+    private void setPointAttributes(Example point, double p1, double p2) {
         //Set smallest ID as a1 and bigger ID as a2
         if (p1 > p2) {
             double temp = p2;
@@ -167,17 +176,32 @@ public class OperatorClass extends Operator implements CapabilityProvider {
         point.setValue(a1, p1);
         point.setValue(a2, p2);
         point.setValue(a3, pairId);
+        mainPointsMap.put(point.getId(), new Point2D.Double(p1,p2));
+        int counter;
+        try {
+            counter = countersMap.get(pairId);
+        } catch (NullPointerException ex) {
+            log(Level.WARNING, "No counter for pair ID: " + pairId);
+            counter = 0;
+        }
+        counter++;
+        if (counter > biggestSize) {
+            biggestSize = counter;
+        }
+        countersMap.put(pairId, counter);
+        pairIdMap.put(point.getId(), pairId);
     }
 
     public void doWork() throws OperatorException {
-        //Set Logger
-
+        biggestSize = 1;
         //Get data
         ExampleSet points = this.in1.getDataOrNull(ExampleSet.class);
         ExampleSet prototypes = this.in2.getDataOrNull(ExampleSet.class);
         addAttributes(points);
         //Main loop
         mainLoop(points, prototypes);
+        //Optimize results
+        optimize(points);
         //Return data
         this.out.deliver(points);
     }
@@ -196,6 +220,8 @@ public class OperatorClass extends Operator implements CapabilityProvider {
             log(Level.INFO, "Point ID: " + point.getId());
             log(Level.INFO, "########################");
             double[] valuesExample = getPointAttributes(attributesExampleSet, point);
+            //New secondary point
+            Point2D.Double secondaryPoint = new Point2D.Double();
             //Check distances
             for (Example prototype : prototypes) {
                 log(Level.INFO, "Prototype ID: " + prototype.getId());
@@ -207,16 +233,66 @@ public class OperatorClass extends Operator implements CapabilityProvider {
                 if (point.getLabel() == prototype.getLabel()) {
                     if (currDistance < minDist1) {
                         minDist1 = currDistance;
+                        secondaryPoint.x = p1;
                         p1 = prototype.getId();
                     }
                 } else {
                     if (currDistance < minDist2) {
                         minDist2 = currDistance;
+                        secondaryPoint.y = p2;
                         p2 = prototype.getId();
                     }
                 }
             }
-            SetPointAttributes(point, p1, p2);
+            setSecondaryPoint(point, secondaryPoint);
+            setPointAttributes(point, p1, p2);
+        }
+    }
+
+    private void setSecondaryPoint(Example point, Point2D.Double secondaryPoint) {
+        if (secondaryPoint.x > secondaryPoint.y) {
+            double temp = secondaryPoint.x;
+            secondaryPoint.x = secondaryPoint.y;
+            secondaryPoint.y = temp;
+        }
+        secondaryPointsMap.put(point.getId(), secondaryPoint);
+    }
+
+    private void optimize(ExampleSet points) {
+        try {
+            int minSize = (int) (biggestSize * getParameterAsDouble(PARAMETER_RATIO));
+            for (Example point : points) {
+                long pairId = pairIdMap.get(point.getId());
+                int counter = countersMap.get(pairId);
+                if (counter < minSize) {
+                    Point2D.Double secondaryPoint = secondaryPointsMap.get(point.getId());
+                    Point2D.Double mainPoint = mainPointsMap.get(point.getId());
+                    double x = secondaryPoint.x;
+                    double y = secondaryPoint.y;
+                    if(x==-1){
+                        x= mainPoint.x;
+                    }
+                    if(y==-1){
+                        y=mainPoint.y;
+                    }
+
+                    long secondaryPairId = Cantor.pair((long) x, (long) y);
+                    try {
+                        int secondaryCounter = countersMap.get(secondaryPairId);
+                        if (secondaryCounter > counter) {
+                            point.setValue(a1, x);
+                            point.setValue(a2, y);
+                            point.setValue(a3, secondaryPairId);
+                        }
+                    } catch (NullPointerException ex){
+                        log(Level.WARNING, "No counter for PAIR_ID:" + secondaryPairId);
+                        log(Level.WARNING, "Secondary X:" + secondaryPoint.x);
+                        log(Level.WARNING, "Secondary Y:" + secondaryPoint.y);
+                    }
+                }
+            }
+        } catch (UndefinedParameterError undefinedParameterError) {
+            log(Level.WARNING, "No Ratio skipping optimize");
         }
     }
 }
