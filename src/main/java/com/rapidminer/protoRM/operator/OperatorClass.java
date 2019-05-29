@@ -213,7 +213,7 @@ public class OperatorClass extends Operator implements CapabilityProvider {
             log(Level.INFO, "########################");
             double[] valuesExample = getPointAttributes(attributesExampleSet, point);
             //New secondary point
-            PointContainer pointData = new PointContainer(point.getId());
+            PointContainer pointData = new PointContainer();
             //Check distances
             for (Example prototype : prototypes) {
                 log(Level.INFO, "Prototype ID: " + prototype.getId());
@@ -236,13 +236,12 @@ public class OperatorClass extends Operator implements CapabilityProvider {
 
     private void optimize(ExampleSet points) {
         try {
+            double ratio = getParameterAsDouble(PARAMETER_RATIO);
             for (Example point : points) {
                 while (true) {
-                    int minSize = (int) (biggestSize * getParameterAsDouble(PARAMETER_RATIO));
-                    log(Level.INFO, "Minimal size:" + minSize);
+                    double minSize = biggestSize * ratio;
                     long pairId = pairIdMap.get(point.getId());
                     int counter = countersMap.get(pairId);
-                    log(Level.INFO, "Point ID: " + point.getId() + " size:" + counter);
                     if (counter < minSize) {
                         try {
                             PointContainer data = pointDataMap.get(point.getId());
