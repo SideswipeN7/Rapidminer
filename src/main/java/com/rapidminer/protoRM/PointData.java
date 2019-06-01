@@ -1,7 +1,7 @@
 package com.rapidminer.protoRM;
 
-public class PointData implements Comparable<PointData>{
-    private  double pointId_;
+public class PointData implements Comparable<PointData> {
+    private double pointId_;
     private double distance_;
 
     public PointData(double pointId, double distance) {
@@ -9,7 +9,7 @@ public class PointData implements Comparable<PointData>{
         this.distance_ = distance;
     }
 
-    public double getPointId() {
+    public double getId() {
         return pointId_;
     }
 
