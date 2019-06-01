@@ -17,9 +17,9 @@ import com.rapidminer.operator.ports.metadata.DistanceMeasurePrecondition;
 import com.rapidminer.parameter.ParameterType;
 import com.rapidminer.parameter.ParameterTypeBoolean;
 import com.rapidminer.parameter.ParameterTypeDouble;
-import com.rapidminer.parameter.UndefinedParameterError;
 import com.rapidminer.protoRM.PointContainer;
 import com.rapidminer.protoRM.PointData;
+import com.rapidminer.protoRM.PointPair;
 import com.rapidminer.protoRM.PointType;
 import com.rapidminer.tools.Ontology;
 import com.rapidminer.tools.OperatorService;
@@ -28,7 +28,9 @@ import com.rapidminer.tools.math.similarity.DistanceMeasure;
 import com.rapidminer.tools.math.similarity.DistanceMeasureHelper;
 import com.rapidminer.tools.math.similarity.DistanceMeasures;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -47,10 +49,17 @@ public class OperatorClass extends Operator implements CapabilityProvider {
     private Attribute a2 = AttributeFactory.createAttribute("ID_Proto_2", Ontology.NUMERICAL);
     private Attribute a3 = AttributeFactory.createAttribute("ID_Proto_Pair", Ontology.NUMERICAL);
     //Optimize
-    private HashMap<Double, PointContainer> pointDataMap = new HashMap<>();
-    private HashMap<Double, Long> pairIdMap = new HashMap<>();
+//    private HashMap<Double, PointContainer> pointDataMap = new HashMap<>();
+//    private HashMap<Double, Long> pairIdMap = new HashMap<>();
     private HashMap<Long, Integer> countersMap = new HashMap<>();
-    private int biggestSize = -1;
+    private int maxSize_;
+    private int minSize_;
+    private double ratio_;
+    private ExampleSet points_;
+    private ExampleSet prototypes_;
+    private DistanceMeasure distanceMeasure_;
+    private HashMap<Long, LinkedList<PointContainer>> pairContainerListMap_ = new HashMap<>();
+    private HashMap<Double, PointContainer> containerMap_ = new HashMap<>();
 
     /**
      * <p>
@@ -89,12 +98,6 @@ public class OperatorClass extends Operator implements CapabilityProvider {
                     return false;
             }
         }, in1));
-    }
-
-    private void log(java.util.logging.Level level, String message) {
-        if (getParameterAsBoolean(PARAMETER_DEBUG)) {
-            logger.log(level, message);
-        }
     }
 
     @Override
@@ -154,123 +157,170 @@ public class OperatorClass extends Operator implements CapabilityProvider {
         return valuesExample;
     }
 
-    private void addAttributes(ExampleSet points) {
-        //Add attributes to table
-        points.getExampleTable().addAttribute(a1);
-        points.getExampleTable().addAttribute(a2);
-        points.getExampleTable().addAttribute(a3);
-        //Add attributes as Special
-        points.getAttributes().setSpecialAttribute(a1, "id_pair_1");
-        points.getAttributes().setSpecialAttribute(a2, "id_pair_2");
-        points.getAttributes().setSpecialAttribute(a3, "batch");
-    }
-
-    private void setPointAttributes(Example point, PointContainer pointData) {
-        Tupel<PointData, PointData> tuple = pointData.getPair();
-        long pairId = pointData.getPairId();
-        pairIdMap.put(point.getId(), pairId);
-        //Set point values
-        point.setValue(a1, tuple.getFirst().getPointId());
-        point.setValue(a2, tuple.getSecond().getPointId());
-        point.setValue(a3, pairId);
-        int counter;
-        try {
-            counter = countersMap.get(pairId);
-        } catch (NullPointerException ex) {
-            log(Level.WARNING, "No counter for pair ID: " + pairId);
-            counter = 0;
-        }
-        counter++;
-        if (counter > biggestSize) {
-            biggestSize = counter;
-        }
-        countersMap.put(pairId, counter);
-        pointDataMap.put(point.getId(), pointData);
-    }
 
     public void doWork() throws OperatorException {
-        biggestSize = 1;
         //Get data
-        ExampleSet points = this.in1.getDataOrNull(ExampleSet.class);
-        ExampleSet prototypes = this.in2.getDataOrNull(ExampleSet.class);
-        addAttributes(points);
-        //Main loop
-        mainLoop(points, prototypes);
-        //Optimize results
-        optimize(points);
+        getData();
+        try {
+            //Add attributes
+            addAttributes();
+            //Calculate Groups
+            calculate();
+            //Optimize results
+            optimize();
+            //Set attributes
+            setAttributes();
+        } catch (NullPointerException ex) {
+            log(Level.SEVERE, ex.getMessage());
+        }
         //Return data
-        this.out.deliver(points);
+        this.out.deliver(points_);
     }
 
-    private void mainLoop(ExampleSet points, ExampleSet prototypes) throws OperatorException {
-        DistanceMeasure distance = measureHelper.getInitializedMeasure(points);
+    private void getData() throws OperatorException {
+        log(Level.INFO, "Step 1: Get Data");
+        points_ = this.in1.getDataOrNull(ExampleSet.class);
+        prototypes_ = this.in2.getDataOrNull(ExampleSet.class);
+        ratio_ = getParameterAsDouble(PARAMETER_RATIO);
+        distanceMeasure_ = measureHelper.getInitializedMeasure(points_);
+    }
+
+    private void addAttributes() {
+        log(Level.INFO, "Step 2: Add Attributes");
+        //Add attributes to table
+        points_.getExampleTable().addAttribute(a1);
+        points_.getExampleTable().addAttribute(a2);
+        points_.getExampleTable().addAttribute(a3);
+        //Add attributes as Special
+        points_.getAttributes().setSpecialAttribute(a1, "id_pair_1");
+        points_.getAttributes().setSpecialAttribute(a2, "id_pair_2");
+        points_.getAttributes().setSpecialAttribute(a3, "batch");
+    }
+
+    private void calculate() {
+        log(Level.INFO, "Step 3: Calculate");
         //Get Attributes
-        Attributes attributesExampleSet = points.getAttributes();
-        Attributes attributesPrototypes = prototypes.getAttributes();
-        for (Example point : points) {
+        Attributes attributesExampleSet = points_.getAttributes();
+        Attributes attributesPrototypes = prototypes_.getAttributes();
+        for (Example point : points_) {
+            double pointId = point.getId();
             log(Level.INFO, "########################");
-            log(Level.INFO, "Point ID: " + point.getId());
+            log(Level.INFO, "Point ID: " + pointId);
             log(Level.INFO, "########################");
             double[] valuesExample = getPointAttributes(attributesExampleSet, point);
             //New secondary point
-            PointContainer pointData = new PointContainer();
+            PointContainer pointContainer = new PointContainer();
             //Check distances
-            for (Example prototype : prototypes) {
-                log(Level.INFO, "Prototype ID: " + prototype.getId());
-                //Calculate distance
+            for (Example prototype : prototypes_) {
+                double prototypeId = prototype.getId();
+                log(Level.INFO, "Prototype ID: " + prototypeId);
+                //Calculate distanceMeasure
                 double[] valuesPrototype = getPrototypeAttributes(attributesExampleSet, attributesPrototypes, prototype);
-                double currDistance = distance.calculateDistance(valuesExample, valuesPrototype);
-                PointData calculated = new PointData(prototype.getId(), currDistance);
-                log(Level.INFO, "Distance: " + currDistance);
+                double distance = distanceMeasure_.calculateDistance(valuesExample, valuesPrototype);
+                PointData data = new PointData(prototypeId, distance);
+                log(Level.INFO, "Distance: " + distance);
                 //Set distances
                 if (point.getLabel() == prototype.getLabel()) {
-                    pointData.addPoint(PointType.MyClass, calculated);
+                    pointContainer.add(PointType.MyClass, data);
                 } else {
-                    pointData.addPoint(PointType.OtherClass, calculated);
+                    pointContainer.add(PointType.OtherClass, data);
                 }
             }
-            pointData.sort();
-            setPointAttributes(point, pointData);
+            log(Level.INFO, "Sorting");
+            pointContainer.sort();
+            //Set data
+            addPointContainer(pointContainer);
+            containerMap_.put(pointId, pointContainer);
         }
     }
 
-    private void optimize(ExampleSet points) {
-        try {
-            double ratio = getParameterAsDouble(PARAMETER_RATIO);
-            for (Example point : points) {
-                while (true) {
-                    double minSize = biggestSize * ratio;
-                    long pairId = pairIdMap.get(point.getId());
-                    int counter = countersMap.get(pairId);
-                    if (counter < minSize) {
-                        try {
-                            PointContainer data = pointDataMap.get(point.getId());
-                            data.generateNewPair();
-                            counter--;
-                            countersMap.put(pairId, counter);
-                            log(Level.INFO, "Optimizing point ID:" + point.getId());
-                            setPointAttributes(point, data);
-                            calculateBiggestCounter();
-                        } catch (NullPointerException ex) {
-                            log(Level.WARNING, "Cant optimize point ID:" + point.getId());
-                            break;
+    private void optimize() {
+        log(Level.INFO, "Step 4: Optimize");
+        calculateSizes();
+        while (true) {
+            int optimized = 0;
+            int toOptimize = 0;
+            for (long pairId : countersMap.keySet()) {
+                if (countersMap.get(pairId) < minSize_) {
+                    toOptimize++;
+                    LinkedList<PointContainer> list = new LinkedList<>(pairContainerListMap_.get(pairId));
+                    int countMaxed = 0;
+                    for (PointContainer pc : list) {
+                        if (pc.hasNext()) {
+                            removePointContainer(pc, pairId);
+                            pc.next();
+                            addPointContainer(pc);
+                            calculateSizes();
+                        } else {
+                            countMaxed++;
                         }
-                    } else {
-                        break;
+                    }
+                    if (countMaxed == list.size()) {
+                        optimized++;
                     }
                 }
             }
-        } catch (UndefinedParameterError undefinedParameterError) {
-            log(Level.WARNING, "No Ratio skipping optimize");
+            if (toOptimize == optimized) {
+                break;
+            }
         }
     }
 
-    private void calculateBiggestCounter() {
-        biggestSize = -1;
+    private void setAttributes() {
+        log(Level.INFO, "Step 5: Set Attributes");
+        for (Example point : points_) {
+            double pointId = point.getId();
+            PointContainer pc = containerMap_.get(pointId);
+            PointPair pr = pc.get();
+            point.setValue(a1, pr.getFirstPoint().getId());
+            point.setValue(a2, pr.getSecondPoint().getId());
+            point.setValue(a3, pr.getPairId());
+        }
+    }
+
+
+    private void addPointContainer(PointContainer pointContainer) {
+        long pairId = pointContainer.get().getPairId();
+        log(Level.INFO, "Adding container for Pair ID: " + pairId);
+        LinkedList<PointContainer> list = pairContainerListMap_.get(pairId);
+        if (list == null) {
+            list = new LinkedList<>();
+            log(Level.WARNING, "No List for pair ID: " + pairId);
+        }
+        list.add(pointContainer);
+        pairContainerListMap_.put(pairId, list);
+        countersMap.put(pairId, list.size());
+        log(Level.INFO, "Pair ID: " + pairId + " size: " + list.size());
+    }
+
+    private void removePointContainer(PointContainer pointContainer, long pairId) {
+        LinkedList<PointContainer> list = pairContainerListMap_.get(pairId);
+        list.remove(pointContainer);
+        pairContainerListMap_.put(pairId, list);
+        countersMap.put(pairId, list.size());
+    }
+
+    private void calculateSizes() {
+        calculateMaxSize();
+        calculateMinSize();
+    }
+
+    private void calculateMinSize() {
+        minSize_ = (int) (ratio_ * maxSize_);
+    }
+
+    private void calculateMaxSize() {
+        maxSize_ = -1;
         for (long key : countersMap.keySet()) {
-            if (countersMap.get(key) > biggestSize) {
-                biggestSize = countersMap.get(key);
+            if (countersMap.get(key) > maxSize_) {
+                maxSize_ = countersMap.get(key);
             }
+        }
+    }
+
+    private void log(java.util.logging.Level level, String message) {
+        if (getParameterAsBoolean(PARAMETER_DEBUG)) {
+            logger.log(level, message);
         }
     }
 }
